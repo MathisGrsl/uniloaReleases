@@ -1,0 +1,71 @@
+name: Mac build
+
+# Builds Uniloa for Mac from the private source repository and publishes it under the
+# tag mac-linux, beside the Linux version. Run by hand from the Actions tab.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit of MathisGrsl/uniloa to build
+        required: true
+        default: 03dc81621c623aa85ff030f104658d91d8e23e93
+
+permissions:
+  contents: write
+
+jobs:
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: MathisGrsl/uniloa
+          ref: ${{ inputs.ref }}
+          ssh-key: ${{ secrets.UNILOA_SOURCE_KEY }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund --loglevel=error > npm.log 2>&1 || (tail -30 npm.log; exit 1)
+
+      - name: Build the installer
+        env:
+          PM_SERVER_URL: https://uniloa.com
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: |
+          chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper
+          node desktop/scripts/build.mjs --installer > build.log 2>&1 || (tail -40 build.log; exit 1)
+          grep -E "electron-builder|building|target=" build.log | tail -10 || true
+          ls -la desktop/release
+
+      - name: Try the Mac app as it is downloaded, on both kinds of processor
+        run: |
+          hdiutil attach desktop/release/Uniloa.dmg -nobrowse -mountpoint /tmp/uniloa
+          ditto /tmp/uniloa/Uniloa.app /Applications/Uniloa.app
+          APP=/Applications/Uniloa.app/Contents/MacOS/Uniloa
+          lipo -archs "$APP"
+          codesign --verify --deep --strict --verbose=2 /Applications/Uniloa.app
+          node desktop/scripts/smoke-run.mjs smoke-mac-arm64.png "$APP"
+          softwareupdate --install-rosetta --agree-to-license || true
+          security delete-generic-password -s "@pm/desktop Safe Storage"
+          node desktop/scripts/smoke-run.mjs smoke-mac-x64.png arch -x86_64 "$APP"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screens-mac
+          path: smoke-*.png
+          if-no-files-found: ignore
+
+      - name: Publish under mac-linux
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd desktop/release
+          gh release view mac-linux --repo "$GITHUB_REPOSITORY" > /dev/null
+          files=$(ls Uniloa.* | grep -v AppImage)
+          gh release upload mac-linux $files --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload mac-linux latest-mac.yml --repo "$GITHUB_REPOSITORY" --clobber
