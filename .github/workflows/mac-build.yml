@@ -1,7 +1,8 @@
 name: Mac build
 
 # Builds Uniloa for Mac from the private source repository and publishes it under the
-# tag mac-linux, beside the Linux version. Run by hand from the Actions tab.
+# tag mac-linux, beside the Linux version. Run by hand from the Actions tab. With publish
+# unticked, the app is built and tried and nothing is published.
 on:
   workflow_dispatch:
     inputs:
@@ -9,6 +10,10 @@ on:
         description: Commit of MathisGrsl/uniloa to build
         required: true
         default: 03dc81621c623aa85ff030f104658d91d8e23e93
+      publish:
+        description: Publish it under mac-linux once tried
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -60,7 +65,9 @@ jobs:
           path: smoke-*.png
           if-no-files-found: ignore
 
+      # Written for a true told either way, as a boolean or as the word: anything else publishes nothing.
       - name: Publish under mac-linux
+        if: ${{ inputs.publish == true || inputs.publish == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
