@@ -2,13 +2,18 @@ name: Linux build
 
 # Builds Uniloa for Linux from the private source repository, tries it on the oldest and the
 # newest Ubuntu served, and publishes it under the tag mac-linux, beside the Mac version.
-# Run by hand from the Actions tab. Logs are public: the steps print as little as they can.
+# Run by hand from the Actions tab. With publish unticked, the app is built and tried and
+# nothing is published. Logs are public: the steps print as little as they can.
 on:
   workflow_dispatch:
     inputs:
       ref:
         description: Commit of MathisGrsl/uniloa to build
         required: true
+      publish:
+        description: Publish it under mac-linux once tried
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -98,8 +103,10 @@ jobs:
           path: smoke-*.png
           if-no-files-found: ignore
 
+  # Written for a true told either way, as a boolean or as the word: anything else publishes nothing.
   publish:
     needs: [build, newer-linux]
+    if: ${{ inputs.publish == true || inputs.publish == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
