@@ -15,26 +15,29 @@ on:
         type: boolean
         default: true
 
+# The job that runs the source and its dependencies can only read: publish alone writes releases.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   mac:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      # With persist-credentials false, checkout deletes the source key from the disk as it ends.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: MathisGrsl/uniloa
           ref: ${{ inputs.ref }}
           ssh-key: ${{ secrets.UNILOA_SOURCE_KEY }}
           persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
 
+      # No dependency's install script runs: the Mac build needs none (node-pty ships its Mac binaries).
       - name: Install dependencies
-        run: npm ci --no-audit --no-fund --loglevel=error > npm.log 2>&1 || (tail -30 npm.log; exit 1)
+        run: npm ci --ignore-scripts --no-audit --no-fund --loglevel=error > npm.log 2>&1 || (tail -30 npm.log; exit 1)
 
       - name: Build the installer
         env:
@@ -58,21 +61,45 @@ jobs:
           security delete-generic-password -s "@pm/desktop Safe Storage"
           node desktop/scripts/smoke-run.mjs smoke-mac-x64.png arch -x86_64 "$APP"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: screens-mac
           path: smoke-*.png
           if-no-files-found: ignore
 
-      # Written for a true told either way, as a boolean or as the word: anything else publishes nothing.
-      - name: Publish under mac-linux
+      # Handed over to the publish job; a trial keeps no installer.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: ${{ inputs.publish == true || inputs.publish == 'true' }}
+        with:
+          name: installer-mac
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            desktop/release/Uniloa.dmg
+            desktop/release/Uniloa.dmg.blockmap
+            desktop/release/Uniloa.zip
+            desktop/release/Uniloa.zip.blockmap
+            desktop/release/latest-mac.yml
+
+  # Written for a true told either way, as a boolean or as the word: anything else publishes nothing.
+  # The only job that may write releases: it installs and runs nothing of the source or of npm.
+  publish:
+    needs: mac
+    if: ${{ inputs.publish == true || inputs.publish == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: installer-mac
+
+      # latest-mac.yml goes last: the updater must not read it before the installers are there.
+      - name: Publish under mac-linux
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cd desktop/release
           gh release view mac-linux --repo "$GITHUB_REPOSITORY" > /dev/null
-          files=$(ls Uniloa.* | grep -v AppImage)
-          gh release upload mac-linux $files --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload mac-linux Uniloa.dmg Uniloa.dmg.blockmap Uniloa.zip Uniloa.zip.blockmap --repo "$GITHUB_REPOSITORY" --clobber
           gh release upload mac-linux latest-mac.yml --repo "$GITHUB_REPOSITORY" --clobber
