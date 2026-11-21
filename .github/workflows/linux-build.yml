@@ -4,6 +4,11 @@ name: Linux build
 # newest Ubuntu served, and publishes it under the tag mac-linux, beside the Mac version.
 # Run by hand from the Actions tab. With publish unticked, the app is built and tried and
 # nothing is published. Logs are public: the steps print as little as they can.
+# The apps installed take an update only with its signature (Uniloa.AppImage.sig), made with a
+# key this repository does not hold. With unsigned ticked, the app is built without it, tried,
+# and kept seven days as the artifact installer-linux: it is signed where the key is kept and
+# published from there (the AppImage, its .sig, then latest-linux.yml). Nothing is published
+# from here then, whatever publish says: the apps would leave an unsigned update aside.
 on:
   workflow_dispatch:
     inputs:
@@ -14,6 +19,10 @@ on:
         description: Publish it under mac-linux once tried
         type: boolean
         default: true
+      unsigned:
+        description: Build without the update signature, to sign where the key is kept (publishes nothing)
+        type: boolean
+        default: false
 
 # The jobs that run the source and its dependencies can only read: publish alone writes releases.
 permissions:
@@ -46,8 +55,11 @@ jobs:
         env:
           PM_SERVER_URL: https://uniloa.com
           NODE_OPTIONS: --max-old-space-size=4096
+          UNSIGNED: ${{ inputs.unsigned }}
         run: |
-          node desktop/scripts/build.mjs --installer > build.log 2>&1 || (tail -40 build.log; exit 1)
+          flags=""
+          if [ "$UNSIGNED" = "true" ]; then flags="--no-update-signature"; fi
+          node desktop/scripts/build.mjs --installer $flags > build.log 2>&1 || (tail -40 build.log; exit 1)
           grep -E "electron-builder|building|target=" build.log | tail -10 || true
           ls -la desktop/release
 
@@ -112,7 +124,7 @@ jobs:
   # The only job that may write releases: it installs and runs nothing of the source or of npm.
   publish:
     needs: [build, newer-linux]
-    if: ${{ inputs.publish == true || inputs.publish == 'true' }}
+    if: ${{ (inputs.publish == true || inputs.publish == 'true') && !(inputs.unsigned == true || inputs.unsigned == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
