@@ -1,0 +1,60 @@
+name: Windows build
+
+# Builds Uniloa's Windows installer from the private source repository, without the update
+# signature, and keeps it seven days as the artifact installer-windows. Run by hand from the
+# Actions tab. Nothing is published from here: the apps installed take an update only with its
+# signature (Uniloa-Setup.exe.sig), made with a key this repository does not hold, so the
+# installer is signed where the key is kept and published from there (the installer, its
+# .blockmap, its .sig, then latest.yml). Logs are public: the steps print as little as they can.
+# Added on 2026-11-26: on the computer that built the Windows version until then, Smart App
+# Control refuses the unsigned program NSIS writes and runs to make the uninstaller.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit of MathisGrsl/uniloa to build
+        required: true
+
+# The job runs the source and its dependencies: it can only read, and writes no release.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      # With persist-credentials false, checkout deletes the source key from the disk as it ends.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: MathisGrsl/uniloa
+          ref: ${{ inputs.ref }}
+          ssh-key: ${{ secrets.UNILOA_SOURCE_KEY }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      # No dependency's install script runs: node-pty ships its Windows binaries.
+      - name: Install dependencies
+        shell: bash
+        run: npm ci --ignore-scripts --no-audit --no-fund --loglevel=error > npm.log 2>&1 || (tail -30 npm.log; exit 1)
+
+      - name: Build the installer
+        shell: bash
+        env:
+          PM_SERVER_URL: https://uniloa.com
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: |
+          node desktop/scripts/build.mjs --installer --no-update-signature > build.log 2>&1 || (tail -40 build.log; exit 1)
+          grep -E "electron-builder|building|target=" build.log | tail -10 || true
+          ls -la desktop/release
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: installer-windows
+          retention-days: 7
+          path: |
+            desktop/release/Uniloa-Setup.exe
+            desktop/release/Uniloa-Setup.exe.blockmap
+            desktop/release/latest.yml
