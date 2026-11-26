@@ -1,0 +1,41 @@
+name: Attach Windows installer
+
+# Puts the installer a Windows build made (its artifact installer-windows) on a release, a draft
+# too, from GitHub's own side: for when the computer that signs a release cannot send 120 MB.
+# That computer uploads the update's signature (.sig) and latest.yml itself, after this run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run:
+        description: Id of the Windows build run whose installer goes on the release
+        required: true
+      tag:
+        description: Tag of the release (a draft too)
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  attach:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: installer-windows
+          run-id: ${{ inputs.run }}
+          github-token: ${{ github.token }}
+      - name: Attach the installer and its blockmap
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          ls -l
+          sha512sum Uniloa-Setup.exe | cut -d' ' -f1 | xxd -r -p | base64 -w0; echo
+          grep sha512 latest.yml | head -1
+          gh release upload "$TAG" Uniloa-Setup.exe Uniloa-Setup.exe.blockmap --repo "$GITHUB_REPOSITORY" --clobber
